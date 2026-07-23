@@ -10,6 +10,9 @@ const LINKS = [
   { href: '/importar', label: 'Importar pedido' },
 ];
 
+const SOLICITAR_MEJORA_HREF =
+  'mailto:carolinagerosa@hotmail.com?subject=' + encodeURIComponent('Solicitud mejora FarmaLagos');
+
 export function NavBar() {
   const pathname = usePathname();
 
@@ -35,6 +38,12 @@ export function NavBar() {
               </Link>
             );
           })}
+          <a
+            href={SOLICITAR_MEJORA_HREF}
+            className="ml-1 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100"
+          >
+            Solicitar mejora
+          </a>
         </nav>
       </div>
     </header>
