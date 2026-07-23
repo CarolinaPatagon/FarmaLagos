@@ -40,7 +40,7 @@ export function NavBar() {
           })}
           <a
             href={SOLICITAR_MEJORA_HREF}
-            className="ml-1 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100"
+            className="ml-1 rounded-lg bg-amber-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-amber-600"
           >
             Solicitar mejora
           </a>
