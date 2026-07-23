@@ -1,3 +1,4 @@
+import type { PoolClient } from 'pg';
 import { getDb } from './db';
 import type { ParseResult } from './parser';
 import type {
@@ -57,6 +58,26 @@ export interface InsertPedidoResult {
   reemplazado: boolean;
 }
 
+async function insertarLineas(client: PoolClient, pedidoId: number, lineas: ParseResult['lineas']): Promise<void> {
+  for (const linea of lineas) {
+    await client.query(
+      `INSERT INTO pedido_lineas
+        (pedido_id, linea_numero, codigo_interno, codigo_barras, nombre_comercial, laboratorio, producto, unidades)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        pedidoId,
+        linea.lineNumber,
+        linea.codigoInterno,
+        linea.codigoBarras,
+        linea.nombreComercial,
+        linea.laboratorio,
+        linea.producto,
+        linea.unidades,
+      ]
+    );
+  }
+}
+
 export async function upsertPedido({
   nombre,
   fecha,
@@ -101,23 +122,7 @@ export async function upsertPedido({
       pedidoId = info.rows[0].id;
     }
 
-    for (const linea of parseResult.lineas) {
-      await client.query(
-        `INSERT INTO pedido_lineas
-          (pedido_id, linea_numero, codigo_interno, codigo_barras, nombre_comercial, laboratorio, producto, unidades)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [
-          pedidoId,
-          linea.lineNumber,
-          linea.codigoInterno,
-          linea.codigoBarras,
-          linea.nombreComercial,
-          linea.laboratorio,
-          linea.producto,
-          linea.unidades,
-        ]
-      );
-    }
+    await insertarLineas(client, pedidoId, parseResult.lineas);
 
     await client.query('COMMIT');
     return { id: pedidoId, reemplazado };
@@ -139,6 +144,75 @@ export async function deletePedido(id: number): Promise<boolean> {
   const db = await getDb();
   const { rowCount } = await db.query('DELETE FROM pedidos WHERE id = $1', [id]);
   return (rowCount ?? 0) > 0;
+}
+
+export type UpdateMetadataResult = { ok: true } | { ok: false; motivo: string };
+
+export async function updatePedidoMetadata(
+  id: number,
+  { nombre, fecha }: { nombre: string; fecha: string }
+): Promise<UpdateMetadataResult> {
+  const db = await getDb();
+
+  const conflicto = await db.query<{ id: number }>(
+    'SELECT id FROM pedidos WHERE nombre = $1 AND fecha = $2 AND id <> $3',
+    [nombre, fecha, id]
+  );
+  if (conflicto.rows[0]) {
+    return { ok: false, motivo: 'Ya existe otro pedido con ese nombre y esa fecha.' };
+  }
+
+  const { rowCount } = await db.query('UPDATE pedidos SET nombre = $1, fecha = $2 WHERE id = $3', [
+    nombre,
+    fecha,
+    id,
+  ]);
+  if (!rowCount) {
+    return { ok: false, motivo: 'Pedido no encontrado.' };
+  }
+  return { ok: true };
+}
+
+export interface ReplacePedidoInput {
+  archivoOriginal: string;
+  parseResult: ParseResult;
+}
+
+export async function replacePedidoArchivo(id: number, { archivoOriginal, parseResult }: ReplacePedidoInput): Promise<boolean> {
+  const pool = await getDb();
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const existing = await client.query<{ id: number }>('SELECT id FROM pedidos WHERE id = $1', [id]);
+    if (!existing.rows[0]) {
+      await client.query('ROLLBACK');
+      return false;
+    }
+
+    await client.query('DELETE FROM pedido_lineas WHERE pedido_id = $1', [id]);
+    await client.query(
+      `UPDATE pedidos
+       SET archivo_original = $1,
+           importado_en = to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS'),
+           total_lineas = $2,
+           total_unidades = $3,
+           total_errores = $4
+       WHERE id = $5`,
+      [archivoOriginal, parseResult.totalLineas, parseResult.totalUnidades, parseResult.errores.length, id]
+    );
+
+    await insertarLineas(client, id, parseResult.lineas);
+
+    await client.query('COMMIT');
+    return true;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 export async function getPedidoDetail(id: number): Promise<PedidoDetail | null> {

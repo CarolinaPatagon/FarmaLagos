@@ -12,9 +12,11 @@ pedidos importados y ofrece un dashboard dinámico para analizarlos, tanto de fo
 - **Importar pedidos** (`/importar`): sube el fichero `.txt` diario, indica el nombre/referencia
   y la fecha del pedido. Si ya existe un pedido con ese mismo nombre y fecha, se reemplaza.
 - **Pedidos históricos** (`/pedidos`): lista y busca todos los pedidos importados, para
-  seleccionar cualquiera de ellos y acceder a su análisis.
+  seleccionar cualquiera de ellos, acceder a su análisis o eliminarlo directamente.
 - **Análisis por pedido** (`/pedidos/[id]`): estadísticas del pedido, top 10 productos y
-  laboratorios por unidades pedidas, y el detalle completo de líneas (con buscador).
+  laboratorios por unidades pedidas, el detalle completo de líneas (con buscador), y acciones
+  para **editar** el nombre/fecha, **reemplazar el fichero** (si no se importó bien) o
+  **eliminar** el pedido.
 - **Dashboard global** (`/`): evolución de unidades pedidas a lo largo del tiempo, top 10
   productos y laboratorios de todo el histórico, y accesos rápidos a los pedidos recientes.
   Se puede filtrar por rango de fechas, por pedido concreto, por laboratorio y por medicamento

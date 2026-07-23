@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
 import { DeletePedidoButton } from '@/components/DeletePedidoButton';
+import { EditPedidoPanel } from '@/components/EditPedidoPanel';
 import { PedidoLineasTable } from '@/components/PedidoLineasTable';
 import { RankingBarChart } from '@/components/RankingBarChart';
 import { StatCard } from '@/components/StatCard';
@@ -33,7 +34,10 @@ export default async function PedidoDetailPage({ params }: { params: Promise<{ i
             </p>
           ) : null}
         </div>
-        <DeletePedidoButton id={pedido.id} nombre={pedido.nombre} />
+        <div className="flex gap-2">
+          <EditPedidoPanel id={pedido.id} nombreActual={pedido.nombre} fechaActual={pedido.fecha} />
+          <DeletePedidoButton id={pedido.id} nombre={pedido.nombre} />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
