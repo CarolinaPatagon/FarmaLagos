@@ -126,3 +126,18 @@ no un fichero local. Pasos:
 3. Despliega — el esquema de tablas se crea solo en la primera petición.
 4. (Opcional) Ejecuta `npm run import:historicos` apuntando `DATABASE_URL` a esa misma base de
    datos para precargar el histórico antes de anunciar la URL a los usuarios.
+
+### Con Supabase
+
+1. En [supabase.com/dashboard](https://supabase.com/dashboard) → **New project**, elige nombre,
+   contraseña de base de datos y región. Espera ~2 min a que se aprovisione.
+2. **Project Settings → Database → Connection string** → copia la de **Connection pooling**
+   (modo *Transaction*, puerto `6543`). Es la recomendada para funciones serverless como las de
+   Vercel, porque no agota las conexiones de Postgres.
+3. En Vercel: **Settings → Environment Variables** → añade `DATABASE_URL` con esa cadena
+   (marca al menos *Production*).
+4. **Deployments → (último deploy) → Redeploy** — los cambios de variables de entorno no se
+   aplican solos, hace falta un nuevo deploy.
+
+`lib/db.ts` activa SSL automáticamente para cualquier `DATABASE_URL` que no sea local, así que
+no hace falta ninguna configuración adicional para que funcione con Supabase.

@@ -42,7 +42,15 @@ function createPool(): Pool {
   if (!connectionString) {
     throw new Error('Falta la variable de entorno DATABASE_URL (cadena de conexión a Postgres).');
   }
-  return new Pool({ connectionString });
+
+  // Los proveedores gestionados (Supabase, Neon, Vercel Postgres...) exigen SSL y usan
+  // certificados que Node no siempre valida por defecto; en local (Postgres propio) no hace falta.
+  const esLocal = /localhost|127\.0\.0\.1/.test(connectionString);
+
+  return new Pool({
+    connectionString,
+    ssl: esLocal ? undefined : { rejectUnauthorized: false },
+  });
 }
 
 export async function getDb(): Promise<Pool> {
