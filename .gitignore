@@ -1,0 +1,19 @@
+node_modules/
+.next/
+out/
+build/
+dist/
+
+# Runtime database (regenerable from data/historicos + imports)
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+/data/farmalagos.db*
+
+.env
+.env.local
+
+npm-debug.log*
+*.tsbuildinfo
+.DS_Store
