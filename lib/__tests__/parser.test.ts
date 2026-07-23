@@ -71,4 +71,38 @@ describe('parsePedidoTxt', () => {
     const bano = result.lineas.find((l) => l.producto.includes('BAÑO'));
     expect(bano).toBeDefined();
   });
+
+  it('parses a single well-formed "formato B" line (con separadores)', () => {
+    const line = 'TOBREX GTS OFT  5 ML           ALCO 000001 02876161 7795306435054';
+    const result = parsePedidoTxt(line);
+
+    expect(result.errores).toHaveLength(0);
+    expect(result.lineas).toHaveLength(1);
+
+    const [linea] = result.lineas;
+    expect(linea.codigoInterno).toBe('02876161');
+    expect(linea.codigoBarras).toBe('7795306435054');
+    expect(linea.laboratorio).toBe('ALCO');
+    expect(linea.producto).toBe('TOBREX GTS OFT  5 ML');
+    expect(linea.nombreComercial).toBe('ALCO TOBREX GTS OFT  5 ML');
+    expect(linea.unidades).toBe(1);
+  });
+
+  it('parses a full real-world "formato B" sample file end-to-end', () => {
+    const buffer = readFileSync(join(__dirname, 'pedido-formato-b-sample.txt'));
+    const content = decodePedidoBuffer(buffer);
+    const result = parsePedidoTxt(content);
+
+    expect(result.totalLineas).toBe(95);
+    expect(result.errores).toHaveLength(0);
+    expect(result.totalUnidades).toBeGreaterThan(0);
+
+    const first = result.lineas[0];
+    expect(first.laboratorio).toBe('ALCO');
+    expect(first.codigoBarras).toBe('7792086750490');
+
+    // Caracter especial CP437 (0xA5) decodificado igual que en el formato A.
+    const conCaracterEspecial = result.lineas.find((l) => l.codigoBarras === '7792183002386');
+    expect(conCaracterEspecial?.producto).toContain('Ñ');
+  });
 });

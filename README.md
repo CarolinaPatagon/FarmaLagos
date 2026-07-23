@@ -22,10 +22,12 @@ pedidos importados y ofrece un dashboard dinámico para analizarlos, tanto de fo
 
 ## Formato del fichero de pedido
 
-Los ficheros de origen tienen un formato de **ancho fijo** (sin separadores), con líneas de
-102 caracteres. Provienen de un sistema DOS y usan la página de códigos **CP437** (no
-ISO-8859-1/UTF-8): por ejemplo, la "Ñ" se codifica como el byte `0xA5`. El parser decodifica
-esto explícitamente (`lib/parser.ts`).
+Se han observado **dos formatos** de origen en los pedidos reales, ambos de ancho fijo y
+ambos en la página de códigos **CP437** (no ISO-8859-1/UTF-8: por ejemplo, la "Ñ" se codifica
+como el byte `0xA5`). El parser (`lib/parser.ts`) detecta automáticamente cuál es línea a
+línea, decodifica el CP437 explícitamente y no depende de que el usuario indique el formato.
+
+**Formato A** — sin separadores, 102 caracteres por línea:
 
 | Campo | Posición (offset) | Longitud | Descripción |
 |---|---|---|---|
@@ -35,12 +37,22 @@ esto explícitamente (`lib/parser.ts`).
 | Unidades pedidas | 67 | 20 | Numérico, con ceros a la izquierda |
 | Reservado | 87 | 15 | Sin uso conocido |
 
-El parser (`lib/parser.ts`) valida cada línea y reporta como error las que no se puedan
-interpretar (demasiado cortas, sin código de barras, sin nombre o con unidades no numéricas),
-sin interrumpir la importación del resto del fichero.
+**Formato B** — con espacios como separadores, 65 caracteres por línea:
 
-Si en el futuro cambia el formato de origen, solo hay que ajustar `lib/parser.ts` — el resto
-de la aplicación (base de datos, API y dashboard) no depende del formato concreto del fichero.
+| Campo | Posición (offset) | Longitud | Descripción |
+|---|---|---|---|
+| Nombre comercial | 0 | 30 | Sin el código de laboratorio |
+| Código de laboratorio | 31 | 4 | |
+| Unidades pedidas | 36 | 6 | Numérico, con ceros a la izquierda |
+| Código interno | 43 | 8 | Código de artículo del proveedor |
+| Código de barras | 52 | 13 | EAN-13 |
+
+El parser valida cada línea y reporta como error las que no se puedan interpretar (demasiado
+cortas, sin código de barras, sin nombre o con unidades no numéricas), sin interrumpir la
+importación del resto del fichero.
+
+Si en el futuro aparece un tercer formato, solo hay que ajustar `lib/parser.ts` — el resto de
+la aplicación (base de datos, API y dashboard) no depende del formato concreto del fichero.
 
 ## Stack técnico
 
