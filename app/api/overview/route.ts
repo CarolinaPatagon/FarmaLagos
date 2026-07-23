@@ -4,6 +4,6 @@ import { getOverview } from '@/lib/queries';
 export const runtime = 'nodejs';
 
 export async function GET() {
-  const overview = getOverview();
+  const overview = await getOverview();
   return NextResponse.json(overview);
 }

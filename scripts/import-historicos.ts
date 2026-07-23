@@ -6,15 +6,23 @@
  *
  * Uso: npm run import:historicos
  */
+import { existsSync } from 'node:fs';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+
+// Los scripts sueltos (a diferencia de Next.js) no cargan .env.local solos.
+for (const envFile of ['.env.local', '.env']) {
+  if (existsSync(envFile)) process.loadEnvFile(envFile);
+}
+
+import { getDb } from '../lib/db';
 import { decodePedidoBuffer, parsePedidoTxt } from '../lib/parser';
 import { upsertPedido } from '../lib/queries';
 
 const HISTORICOS_DIR = join(process.cwd(), 'data', 'historicos');
 const NOMBRE_FECHA_REGEX = /^(.+)__(\d{4}-\d{2}-\d{2})\.txt$/i;
 
-function main() {
+async function main() {
   let files: string[];
   try {
     files = readdirSync(HISTORICOS_DIR).filter((f) => f.toLowerCase().endsWith('.txt'));
@@ -52,7 +60,7 @@ function main() {
       continue;
     }
 
-    const { id, reemplazado } = upsertPedido({
+    const { id, reemplazado } = await upsertPedido({
       nombre: nombre.replace(/_/g, ' ').trim(),
       fecha,
       archivoOriginal: file,
@@ -70,4 +78,12 @@ function main() {
   console.log(`\nResumen: ${importados} pedido(s) importado(s), ${omitidos} fichero(s) omitido(s).`);
 }
 
-main();
+main()
+  .catch((err) => {
+    console.error(err);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    const db = await getDb();
+    await db.end();
+  });

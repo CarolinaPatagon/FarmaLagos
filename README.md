@@ -56,21 +56,30 @@ la aplicación (base de datos, API y dashboard) no depende del formato concreto 
 
 ## Stack técnico
 
-- **Next.js 14** (App Router) + TypeScript + React
-- **SQLite** (`better-sqlite3`) como almacenamiento — fichero único en `data/farmalagos.db`
-  (no versionado; se regenera reimportando los históricos)
+- **Next.js** (App Router) + TypeScript + React
+- **Postgres** (`pg`) como almacenamiento — el esquema se crea solo al arrancar
 - **Recharts** para las visualizaciones
 - **Tailwind CSS** para el estilo
 - **Vitest** para los tests del parser
 
 ## Desarrollo local
 
+Necesitas una base de datos Postgres accesible (local o remota) y su cadena de conexión en
+`DATABASE_URL`. Ejemplo con Postgres local:
+
+```bash
+sudo -u postgres psql -c "CREATE ROLE farmalagos WITH LOGIN PASSWORD 'farmalagos_dev';"
+sudo -u postgres psql -c "CREATE DATABASE farmalagos OWNER farmalagos;"
+cp .env.example .env.local   # ajusta DATABASE_URL si hace falta
+```
+
 ```bash
 npm install
 npm run dev
 ```
 
-La app queda disponible en `http://localhost:3000`.
+La app queda disponible en `http://localhost:3000`. El esquema de tablas se crea
+automáticamente en el primer arranque (no hace falta ejecutar migraciones a mano).
 
 ### Tests
 
@@ -98,7 +107,7 @@ app/                  Páginas y rutas API (Next.js App Router)
 components/           Componentes de UI (gráficos, tablas, formulario)
 lib/
   parser.ts            Parser del fichero de ancho fijo
-  db.ts                 Conexión y esquema SQLite
+  db.ts                 Conexión (pg Pool) y esquema Postgres
   queries.ts            Acceso a datos y agregados
   types.ts              Tipos compartidos
 scripts/
@@ -106,11 +115,14 @@ scripts/
 data/historicos/       Ficheros .txt históricos (fuente para la importación masiva)
 ```
 
-## Notas sobre despliegue
+## Despliegue en Vercel
 
-El almacenamiento por defecto es un fichero SQLite en disco, pensado para ejecutar la
-aplicación en un servidor/contenedor persistente (Docker, VPS, etc.). Si se despliega en una
-plataforma serverless sin disco persistente (por ejemplo Vercel en su modo por defecto), los
-datos importados no sobrevivirán entre despliegues; en ese caso habría que migrar
-`lib/db.ts` a una base de datos gestionada (Postgres, Turso, etc.), manteniendo igual el resto
-de la aplicación.
+La app es compatible con Vercel (funciones serverless) porque el almacenamiento es Postgres,
+no un fichero local. Pasos:
+
+1. Crea una base de datos Postgres accesible desde internet (Vercel Postgres, Neon, Supabase,
+   etc.) y copia su cadena de conexión.
+2. En el proyecto de Vercel, define la variable de entorno `DATABASE_URL` con esa cadena.
+3. Despliega — el esquema de tablas se crea solo en la primera petición.
+4. (Opcional) Ejecuta `npm run import:historicos` apuntando `DATABASE_URL` a esa misma base de
+   datos para precargar el histórico antes de anunciar la URL a los usuarios.

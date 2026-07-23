@@ -35,12 +35,13 @@ function toPedidoSummary(row: PedidoRow): PedidoSummary {
   };
 }
 
-export function findPedidoByNombreFecha(nombre: string, fecha: string): PedidoSummary | null {
-  const db = getDb();
-  const row = db
-    .prepare('SELECT * FROM pedidos WHERE nombre = ? AND fecha = ?')
-    .get(nombre, fecha) as PedidoRow | undefined;
-  return row ? toPedidoSummary(row) : null;
+export async function findPedidoByNombreFecha(nombre: string, fecha: string): Promise<PedidoSummary | null> {
+  const db = await getDb();
+  const { rows } = await db.query<PedidoRow>('SELECT * FROM pedidos WHERE nombre = $1 AND fecha = $2', [
+    nombre,
+    fecha,
+  ]);
+  return rows[0] ? toPedidoSummary(rows[0]) : null;
 }
 
 export interface InsertPedidoInput {
@@ -55,84 +56,97 @@ export interface InsertPedidoResult {
   reemplazado: boolean;
 }
 
-export function upsertPedido({ nombre, fecha, archivoOriginal, parseResult }: InsertPedidoInput): InsertPedidoResult {
-  const db = getDb();
+export async function upsertPedido({
+  nombre,
+  fecha,
+  archivoOriginal,
+  parseResult,
+}: InsertPedidoInput): Promise<InsertPedidoResult> {
+  const pool = await getDb();
+  const client = await pool.connect();
 
-  const run = db.transaction(() => {
-    const existing = db
-      .prepare('SELECT id FROM pedidos WHERE nombre = ? AND fecha = ?')
-      .get(nombre, fecha) as { id: number } | undefined;
+  try {
+    await client.query('BEGIN');
+
+    const existing = await client.query<{ id: number }>('SELECT id FROM pedidos WHERE nombre = $1 AND fecha = $2', [
+      nombre,
+      fecha,
+    ]);
 
     let pedidoId: number;
     let reemplazado = false;
 
-    if (existing) {
-      pedidoId = existing.id;
+    if (existing.rows[0]) {
+      pedidoId = existing.rows[0].id;
       reemplazado = true;
-      db.prepare('DELETE FROM pedido_lineas WHERE pedido_id = ?').run(pedidoId);
-      db.prepare(
+      await client.query('DELETE FROM pedido_lineas WHERE pedido_id = $1', [pedidoId]);
+      await client.query(
         `UPDATE pedidos
-         SET archivo_original = ?, importado_en = datetime('now'), total_lineas = ?, total_unidades = ?, total_errores = ?
-         WHERE id = ?`
-      ).run(archivoOriginal, parseResult.totalLineas, parseResult.totalUnidades, parseResult.errores.length, pedidoId);
+         SET archivo_original = $1,
+             importado_en = to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS'),
+             total_lineas = $2,
+             total_unidades = $3,
+             total_errores = $4
+         WHERE id = $5`,
+        [archivoOriginal, parseResult.totalLineas, parseResult.totalUnidades, parseResult.errores.length, pedidoId]
+      );
     } else {
-      const info = db
-        .prepare(
-          `INSERT INTO pedidos (nombre, fecha, archivo_original, total_lineas, total_unidades, total_errores)
-           VALUES (?, ?, ?, ?, ?, ?)`
-        )
-        .run(nombre, fecha, archivoOriginal, parseResult.totalLineas, parseResult.totalUnidades, parseResult.errores.length);
-      pedidoId = Number(info.lastInsertRowid);
+      const info = await client.query<{ id: number }>(
+        `INSERT INTO pedidos (nombre, fecha, archivo_original, total_lineas, total_unidades, total_errores)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id`,
+        [nombre, fecha, archivoOriginal, parseResult.totalLineas, parseResult.totalUnidades, parseResult.errores.length]
+      );
+      pedidoId = info.rows[0].id;
     }
 
-    const insertLinea = db.prepare(
-      `INSERT INTO pedido_lineas
-        (pedido_id, linea_numero, codigo_interno, codigo_barras, nombre_comercial, laboratorio, producto, unidades)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    );
-
     for (const linea of parseResult.lineas) {
-      insertLinea.run(
-        pedidoId,
-        linea.lineNumber,
-        linea.codigoInterno,
-        linea.codigoBarras,
-        linea.nombreComercial,
-        linea.laboratorio,
-        linea.producto,
-        linea.unidades
+      await client.query(
+        `INSERT INTO pedido_lineas
+          (pedido_id, linea_numero, codigo_interno, codigo_barras, nombre_comercial, laboratorio, producto, unidades)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          pedidoId,
+          linea.lineNumber,
+          linea.codigoInterno,
+          linea.codigoBarras,
+          linea.nombreComercial,
+          linea.laboratorio,
+          linea.producto,
+          linea.unidades,
+        ]
       );
     }
 
+    await client.query('COMMIT');
     return { id: pedidoId, reemplazado };
-  });
-
-  return run();
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
-export function listPedidos(): PedidoSummary[] {
-  const db = getDb();
-  const rows = db.prepare('SELECT * FROM pedidos ORDER BY fecha DESC, importado_en DESC').all() as PedidoRow[];
+export async function listPedidos(): Promise<PedidoSummary[]> {
+  const db = await getDb();
+  const { rows } = await db.query<PedidoRow>('SELECT * FROM pedidos ORDER BY fecha DESC, importado_en DESC');
   return rows.map(toPedidoSummary);
 }
 
-export function deletePedido(id: number): boolean {
-  const db = getDb();
-  const info = db.prepare('DELETE FROM pedidos WHERE id = ?').run(id);
-  return info.changes > 0;
+export async function deletePedido(id: number): Promise<boolean> {
+  const db = await getDb();
+  const { rowCount } = await db.query('DELETE FROM pedidos WHERE id = $1', [id]);
+  return (rowCount ?? 0) > 0;
 }
 
-export function getPedidoDetail(id: number): PedidoDetail | null {
-  const db = getDb();
-  const pedidoRow = db.prepare('SELECT * FROM pedidos WHERE id = ?').get(id) as PedidoRow | undefined;
+export async function getPedidoDetail(id: number): Promise<PedidoDetail | null> {
+  const db = await getDb();
+  const pedidoResult = await db.query<PedidoRow>('SELECT * FROM pedidos WHERE id = $1', [id]);
+  const pedidoRow = pedidoResult.rows[0];
   if (!pedidoRow) return null;
 
-  const lineaRows = db
-    .prepare(
-      `SELECT id, linea_numero, codigo_interno, codigo_barras, nombre_comercial, laboratorio, producto, unidades
-       FROM pedido_lineas WHERE pedido_id = ? ORDER BY linea_numero ASC`
-    )
-    .all(id) as Array<{
+  const lineaResult = await db.query<{
     id: number;
     linea_numero: number;
     codigo_interno: string;
@@ -141,9 +155,13 @@ export function getPedidoDetail(id: number): PedidoDetail | null {
     laboratorio: string;
     producto: string;
     unidades: number;
-  }>;
+  }>(
+    `SELECT id, linea_numero, codigo_interno, codigo_barras, nombre_comercial, laboratorio, producto, unidades
+     FROM pedido_lineas WHERE pedido_id = $1 ORDER BY linea_numero ASC`,
+    [id]
+  );
 
-  const lineas: PedidoLineaRow[] = lineaRows.map((r) => ({
+  const lineas: PedidoLineaRow[] = lineaResult.rows.map((r) => ({
     id: r.id,
     lineaNumero: r.linea_numero,
     codigoInterno: r.codigo_interno,
@@ -157,35 +175,46 @@ export function getPedidoDetail(id: number): PedidoDetail | null {
   return { ...toPedidoSummary(pedidoRow), lineas };
 }
 
-function ranking(db: ReturnType<typeof getDb>, column: 'nombre_comercial' | 'laboratorio', pedidoId?: number): RankingItem[] {
-  const where = pedidoId ? 'WHERE pedido_id = ?' : '';
-  const rows = db
-    .prepare(
-      `SELECT ${column} AS clave, SUM(unidades) AS unidades, COUNT(*) AS lineas
-       FROM pedido_lineas
-       ${where}
-       GROUP BY ${column}
-       ORDER BY unidades DESC
-       LIMIT ${TOP_N}`
-    )
-    .all(...(pedidoId ? [pedidoId] : [])) as Array<{ clave: string; unidades: number; lineas: number }>;
-  return rows.map((r) => ({ clave: r.clave || '(sin dato)', unidades: r.unidades, lineas: r.lineas }));
+async function ranking(
+  db: Awaited<ReturnType<typeof getDb>>,
+  column: 'nombre_comercial' | 'laboratorio',
+  pedidoId?: number
+): Promise<RankingItem[]> {
+  const where = pedidoId ? 'WHERE pedido_id = $1' : '';
+  const { rows } = await db.query<{ clave: string; unidades: string; lineas: string }>(
+    `SELECT ${column} AS clave, SUM(unidades) AS unidades, COUNT(*) AS lineas
+     FROM pedido_lineas
+     ${where}
+     GROUP BY ${column}
+     ORDER BY SUM(unidades) DESC
+     LIMIT ${TOP_N}`,
+    pedidoId ? [pedidoId] : []
+  );
+  return rows.map((r) => ({
+    clave: r.clave || '(sin dato)',
+    unidades: Number(r.unidades),
+    lineas: Number(r.lineas),
+  }));
 }
 
-export function getPedidoAnalysis(id: number): PedidoAnalysis | null {
-  const db = getDb();
-  const pedidoRow = db.prepare('SELECT * FROM pedidos WHERE id = ?').get(id) as PedidoRow | undefined;
+export async function getPedidoAnalysis(id: number): Promise<PedidoAnalysis | null> {
+  const db = await getDb();
+  const pedidoResult = await db.query<PedidoRow>('SELECT * FROM pedidos WHERE id = $1', [id]);
+  const pedidoRow = pedidoResult.rows[0];
   if (!pedidoRow) return null;
 
-  const topProductos = ranking(db, 'nombre_comercial', id);
-  const topLaboratorios = ranking(db, 'laboratorio', id);
+  const [topProductos, topLaboratorios, conteo] = await Promise.all([
+    ranking(db, 'nombre_comercial', id),
+    ranking(db, 'laboratorio', id),
+    db.query<{ productosUnicos: string; laboratoriosUnicos: string }>(
+      `SELECT COUNT(DISTINCT nombre_comercial) AS "productosUnicos", COUNT(DISTINCT laboratorio) AS "laboratoriosUnicos"
+       FROM pedido_lineas WHERE pedido_id = $1`,
+      [id]
+    ),
+  ]);
 
-  const { productosUnicos, laboratoriosUnicos } = db
-    .prepare(
-      `SELECT COUNT(DISTINCT nombre_comercial) AS productosUnicos, COUNT(DISTINCT laboratorio) AS laboratoriosUnicos
-       FROM pedido_lineas WHERE pedido_id = ?`
-    )
-    .get(id) as { productosUnicos: number; laboratoriosUnicos: number };
+  const productosUnicos = Number(conteo.rows[0].productosUnicos);
+  const laboratoriosUnicos = Number(conteo.rows[0].laboratoriosUnicos);
 
   const pedido = toPedidoSummary(pedidoRow);
   const unidadesPromedioPorLinea = pedido.totalLineas > 0 ? pedido.totalUnidades / pedido.totalLineas : 0;
@@ -200,39 +229,40 @@ export function getPedidoAnalysis(id: number): PedidoAnalysis | null {
   };
 }
 
-export function getOverview(): OverviewData {
-  const db = getDb();
+export async function getOverview(): Promise<OverviewData> {
+  const db = await getDb();
 
-  const pedidos = listPedidos();
+  const pedidos = await listPedidos();
 
-  const totales = db
-    .prepare(
-      `SELECT
-        COUNT(DISTINCT pedido_id) AS totalPedidos,
-        COALESCE(SUM(unidades), 0) AS totalUnidades,
-        COUNT(DISTINCT nombre_comercial) AS productosUnicos,
-        COUNT(DISTINCT laboratorio) AS laboratoriosUnicos
-      FROM pedido_lineas`
-    )
-    .get() as {
-    totalPedidos: number;
-    totalUnidades: number;
-    productosUnicos: number;
-    laboratoriosUnicos: number;
-  };
+  const totalesResult = await db.query<{
+    totalPedidos: string;
+    totalUnidades: string;
+    productosUnicos: string;
+    laboratoriosUnicos: string;
+  }>(
+    `SELECT
+      COUNT(DISTINCT pedido_id) AS "totalPedidos",
+      COALESCE(SUM(unidades), 0) AS "totalUnidades",
+      COUNT(DISTINCT nombre_comercial) AS "productosUnicos",
+      COUNT(DISTINCT laboratorio) AS "laboratoriosUnicos"
+    FROM pedido_lineas`
+  );
+  const totales = totalesResult.rows[0];
 
   const evolucion = [...pedidos]
     .sort((a, b) => a.fecha.localeCompare(b.fecha) || a.importadoEn.localeCompare(b.importadoEn))
     .map((p) => ({ fecha: p.fecha, nombre: p.nombre, pedidoId: p.id, unidades: p.totalUnidades, lineas: p.totalLineas }));
 
-  const topProductosHistorico = ranking(db, 'nombre_comercial');
-  const topLaboratoriosHistorico = ranking(db, 'laboratorio');
+  const [topProductosHistorico, topLaboratoriosHistorico] = await Promise.all([
+    ranking(db, 'nombre_comercial'),
+    ranking(db, 'laboratorio'),
+  ]);
 
   return {
-    totalPedidos: totales.totalPedidos,
-    totalUnidadesHistorico: totales.totalUnidades,
-    productosUnicosHistorico: totales.productosUnicos,
-    laboratoriosUnicosHistorico: totales.laboratoriosUnicos,
+    totalPedidos: Number(totales.totalPedidos),
+    totalUnidadesHistorico: Number(totales.totalUnidades),
+    productosUnicosHistorico: Number(totales.productosUnicos),
+    laboratoriosUnicosHistorico: Number(totales.laboratoriosUnicos),
     ultimoPedido: pedidos[0] ?? null,
     evolucion,
     topProductosHistorico,

@@ -14,7 +14,7 @@ export async function GET(_request: Request, { params }: Params) {
     return NextResponse.json({ error: 'Identificador de pedido inválido.' }, { status: 400 });
   }
 
-  const pedido = getPedidoDetail(id);
+  const pedido = await getPedidoDetail(id);
   if (!pedido) {
     return NextResponse.json({ error: 'Pedido no encontrado.' }, { status: 404 });
   }
@@ -29,7 +29,7 @@ export async function DELETE(_request: Request, { params }: Params) {
     return NextResponse.json({ error: 'Identificador de pedido inválido.' }, { status: 400 });
   }
 
-  const eliminado = deletePedido(id);
+  const eliminado = await deletePedido(id);
   if (!eliminado) {
     return NextResponse.json({ error: 'Pedido no encontrado.' }, { status: 404 });
   }

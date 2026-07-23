@@ -5,7 +5,7 @@ import { listPedidos, upsertPedido } from '@/lib/queries';
 export const runtime = 'nodejs';
 
 export async function GET() {
-  const pedidos = listPedidos();
+  const pedidos = await listPedidos();
   return NextResponse.json({ pedidos });
 }
 
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { id, reemplazado } = upsertPedido({
+  const { id, reemplazado } = await upsertPedido({
     nombre,
     fecha,
     archivoOriginal: archivo.name,

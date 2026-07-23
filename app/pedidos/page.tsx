@@ -4,8 +4,8 @@ import { listPedidos } from '@/lib/queries';
 
 export const dynamic = 'force-dynamic';
 
-export default function PedidosPage() {
-  const pedidos = listPedidos();
+export default async function PedidosPage() {
+  const pedidos = await listPedidos();
 
   return (
     <div className="space-y-6">

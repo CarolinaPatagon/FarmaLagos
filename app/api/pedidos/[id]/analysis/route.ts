@@ -14,7 +14,7 @@ export async function GET(_request: Request, { params }: Params) {
     return NextResponse.json({ error: 'Identificador de pedido inválido.' }, { status: 400 });
   }
 
-  const analysis = getPedidoAnalysis(id);
+  const analysis = await getPedidoAnalysis(id);
   if (!analysis) {
     return NextResponse.json({ error: 'Pedido no encontrado.' }, { status: 404 });
   }

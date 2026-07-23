@@ -7,8 +7,8 @@ import { getOverview } from '@/lib/queries';
 
 export const dynamic = 'force-dynamic';
 
-export default function DashboardPage() {
-  const overview = getOverview();
+export default async function DashboardPage() {
+  const overview = await getOverview();
 
   return (
     <div className="space-y-8">

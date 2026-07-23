@@ -13,8 +13,7 @@ export default async function PedidoDetailPage({ params }: { params: Promise<{ i
   const id = Number(idParam);
   if (!Number.isInteger(id)) notFound();
 
-  const pedido = getPedidoDetail(id);
-  const analysis = getPedidoAnalysis(id);
+  const [pedido, analysis] = await Promise.all([getPedidoDetail(id), getPedidoAnalysis(id)]);
   if (!pedido || !analysis) notFound();
 
   return (
