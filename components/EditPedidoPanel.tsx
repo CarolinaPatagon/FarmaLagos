@@ -1,12 +1,20 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
+import { formatFecha } from '@/lib/format';
 
 interface EditPedidoPanelProps {
   id: number;
   nombreActual: string;
   fechaActual: string;
+}
+
+interface DuplicadoInfo {
+  id: number;
+  nombre: string;
+  fecha: string;
 }
 
 export function EditPedidoPanel({ id, nombreActual, fechaActual }: EditPedidoPanelProps) {
@@ -22,6 +30,7 @@ export function EditPedidoPanel({ id, nombreActual, fechaActual }: EditPedidoPan
   const [reemplazando, setReemplazando] = useState(false);
   const [errorArchivo, setErrorArchivo] = useState<string | null>(null);
   const [okArchivo, setOkArchivo] = useState<string | null>(null);
+  const [duplicado, setDuplicado] = useState<DuplicadoInfo | null>(null);
 
   async function guardarMetadata(e: React.FormEvent) {
     e.preventDefault();
@@ -46,10 +55,11 @@ export function EditPedidoPanel({ id, nombreActual, fechaActual }: EditPedidoPan
     }
   }
 
-  async function reemplazarArchivo(e: React.FormEvent) {
-    e.preventDefault();
+  async function reemplazarArchivo(e?: React.FormEvent, forzar = false) {
+    e?.preventDefault();
     setErrorArchivo(null);
     setOkArchivo(null);
+    if (!forzar) setDuplicado(null);
 
     const file = fileInputRef.current?.files?.[0];
     if (!file) {
@@ -59,15 +69,21 @@ export function EditPedidoPanel({ id, nombreActual, fechaActual }: EditPedidoPan
 
     const formData = new FormData();
     formData.set('archivo', file);
+    if (forzar) formData.set('forzar', '1');
 
     setReemplazando(true);
     try {
       const res = await fetch(`/api/pedidos/${id}`, { method: 'PUT', body: formData });
       const data = await res.json();
+      if (res.status === 409 && data.duplicado) {
+        setDuplicado(data.duplicado as DuplicadoInfo);
+        return;
+      }
       if (!res.ok) {
         setErrorArchivo(data.error ?? 'No se ha podido reemplazar el fichero.');
         return;
       }
+      setDuplicado(null);
       setOkArchivo(
         `Fichero reemplazado: ${data.totalLineas} líneas · ${data.totalUnidades} unidades${
           data.totalErrores > 0 ? ` · ${data.totalErrores} línea(s) con errores` : ''
@@ -124,6 +140,25 @@ export function EditPedidoPanel({ id, nombreActual, fechaActual }: EditPedidoPan
           </div>
           {errorArchivo ? <p className="text-sm text-red-600">{errorArchivo}</p> : null}
           {okArchivo ? <p className="text-sm text-brand-700">{okArchivo}</p> : null}
+          {duplicado ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-sm text-amber-800">
+                Mismo contenido que el pedido{' '}
+                <Link href={`/pedidos/${duplicado.id}`} className="underline">
+                  {duplicado.nombre} · {formatFecha(duplicado.fecha)}
+                </Link>
+                .
+              </p>
+              <button
+                type="button"
+                onClick={() => reemplazarArchivo(undefined, true)}
+                disabled={reemplazando}
+                className="btn-secondary mt-2"
+              >
+                {reemplazando ? 'Reemplazando…' : 'Reemplazar de todas formas'}
+              </button>
+            </div>
+          ) : null}
           <button type="submit" disabled={reemplazando} className="btn-secondary">
             {reemplazando ? 'Reemplazando…' : 'Reemplazar fichero'}
           </button>

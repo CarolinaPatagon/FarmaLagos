@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 /**
  * Parser para los ficheros de pedidos de medicamentos.
  *
@@ -170,4 +172,15 @@ export function decodePedidoBuffer(buffer: Buffer): string {
     result += byte < 0x80 ? String.fromCharCode(byte) : CP437_UPPER_HALF[byte - 0x80];
   }
   return result;
+}
+
+/**
+ * Huella del contenido de un pedido: código de barras + unidades de cada
+ * línea, en un orden estable (no el orden del fichero). Así se detectan
+ * ficheros ya importados aunque cambie el formato de origen, el orden de
+ * las líneas o detalles de codificación — lo que importa es qué se pidió.
+ */
+export function hashContenidoPedido(lineas: { codigoBarras: string; unidades: number }[]): string {
+  const claves = lineas.map((l) => `${l.codigoBarras}:${l.unidades}`).sort();
+  return createHash('sha256').update(claves.join('\n')).digest('hex');
 }

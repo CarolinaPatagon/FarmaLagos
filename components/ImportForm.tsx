@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useRef, useState } from 'react';
+import { formatFecha } from '@/lib/format';
 
 interface ImportResponse {
   id: number;
@@ -17,6 +18,12 @@ interface ImportError {
   errores?: { lineNumber: number; raw: string; motivo: string }[];
 }
 
+interface DuplicadoInfo {
+  id: number;
+  nombre: string;
+  fecha: string;
+}
+
 function todayIso(): string {
   const now = new Date();
   const tz = now.getTimezoneOffset() * 60000;
@@ -30,6 +37,7 @@ export function ImportForm() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ImportResponse | null>(null);
   const [error, setError] = useState<ImportError | null>(null);
+  const [duplicado, setDuplicado] = useState<DuplicadoInfo | null>(null);
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -38,10 +46,10 @@ export function ImportForm() {
     }
   }
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function enviar(forzar: boolean) {
     setResult(null);
     setError(null);
+    setDuplicado(null);
 
     const file = fileInputRef.current?.files?.[0];
     if (!file) {
@@ -53,12 +61,15 @@ export function ImportForm() {
     formData.set('nombre', nombre);
     formData.set('fecha', fecha);
     formData.set('archivo', file);
+    if (forzar) formData.set('forzar', '1');
 
     setLoading(true);
     try {
       const res = await fetch('/api/pedidos', { method: 'POST', body: formData });
       const data = await res.json();
-      if (!res.ok) {
+      if (res.status === 409 && data.duplicado) {
+        setDuplicado(data.duplicado as DuplicadoInfo);
+      } else if (!res.ok) {
         setError(data as ImportError);
       } else {
         setResult(data as ImportResponse);
@@ -68,6 +79,11 @@ export function ImportForm() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    void enviar(false);
   }
 
   return (
@@ -113,6 +129,22 @@ export function ImportForm() {
           {loading ? 'Importando…' : 'Importar pedido'}
         </button>
       </form>
+
+      {duplicado ? (
+        <div className="card border-amber-200 bg-amber-50">
+          <p className="font-medium text-amber-800">Este fichero parece que ya se importó antes.</p>
+          <p className="mt-1 text-sm text-amber-700">
+            Mismo contenido que el pedido{' '}
+            <Link href={`/pedidos/${duplicado.id}`} className="underline">
+              {duplicado.nombre} · {formatFecha(duplicado.fecha)}
+            </Link>
+            .
+          </p>
+          <button onClick={() => enviar(true)} disabled={loading} className="btn-secondary mt-4">
+            {loading ? 'Importando…' : 'Importar de todas formas'}
+          </button>
+        </div>
+      ) : null}
 
       {error ? (
         <div className="card border-red-200 bg-red-50">

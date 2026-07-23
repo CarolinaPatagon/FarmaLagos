@@ -10,7 +10,10 @@ pedidos importados y ofrece un dashboard dinámico para analizarlos, tanto de fo
 ## Funcionalidades
 
 - **Importar pedidos** (`/importar`): sube el fichero `.txt` diario, indica el nombre/referencia
-  y la fecha del pedido. Si ya existe un pedido con ese mismo nombre y fecha, se reemplaza.
+  y la fecha del pedido. Si ya existe un pedido con ese mismo nombre y fecha, se reemplaza. Si el
+  contenido coincide con el de otro pedido ya importado (mismo código de barras + unidades en
+  cada línea, aunque cambie el nombre/fecha), avisa antes de duplicarlo y permite continuar de
+  todas formas.
 - **Pedidos históricos** (`/pedidos`): lista y busca todos los pedidos importados, para
   seleccionar cualquiera de ellos, acceder a su análisis o eliminarlo directamente.
 - **Análisis por pedido** (`/pedidos/[id]`): estadísticas del pedido, top 10 productos y

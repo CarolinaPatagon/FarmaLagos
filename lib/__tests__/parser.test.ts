@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { decodePedidoBuffer, parsePedidoTxt } from '../parser';
+import { decodePedidoBuffer, hashContenidoPedido, parsePedidoTxt } from '../parser';
 
 describe('parsePedidoTxt', () => {
   it('parses a single well-formed line', () => {
@@ -104,5 +104,31 @@ describe('parsePedidoTxt', () => {
     // Caracter especial CP437 (0xA5) decodificado igual que en el formato A.
     const conCaracterEspecial = result.lineas.find((l) => l.codigoBarras === '7792183002386');
     expect(conCaracterEspecial?.producto).toContain('Ñ');
+  });
+});
+
+describe('hashContenidoPedido', () => {
+  it('produces the same hash regardless of line order', () => {
+    const a = [
+      { codigoBarras: '111', unidades: 2 },
+      { codigoBarras: '222', unidades: 5 },
+    ];
+    const b = [
+      { codigoBarras: '222', unidades: 5 },
+      { codigoBarras: '111', unidades: 2 },
+    ];
+    expect(hashContenidoPedido(a)).toBe(hashContenidoPedido(b));
+  });
+
+  it('produces a different hash when quantities differ', () => {
+    const a = [{ codigoBarras: '111', unidades: 2 }];
+    const b = [{ codigoBarras: '111', unidades: 3 }];
+    expect(hashContenidoPedido(a)).not.toBe(hashContenidoPedido(b));
+  });
+
+  it('produces a different hash when a product differs', () => {
+    const a = [{ codigoBarras: '111', unidades: 2 }];
+    const b = [{ codigoBarras: '999', unidades: 2 }];
+    expect(hashContenidoPedido(a)).not.toBe(hashContenidoPedido(b));
   });
 });

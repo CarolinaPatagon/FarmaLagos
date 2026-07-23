@@ -16,7 +16,7 @@ for (const envFile of ['.env.local', '.env']) {
 }
 
 import { getDb } from '../lib/db';
-import { decodePedidoBuffer, parsePedidoTxt } from '../lib/parser';
+import { decodePedidoBuffer, hashContenidoPedido, parsePedidoTxt } from '../lib/parser';
 import { upsertPedido } from '../lib/queries';
 
 const HISTORICOS_DIR = join(process.cwd(), 'data', 'historicos');
@@ -65,6 +65,7 @@ async function main() {
       fecha,
       archivoOriginal: file,
       parseResult,
+      contenidoHash: hashContenidoPedido(parseResult.lineas),
     });
 
     console.log(

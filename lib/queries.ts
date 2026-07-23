@@ -51,6 +51,7 @@ export interface InsertPedidoInput {
   fecha: string;
   archivoOriginal: string;
   parseResult: ParseResult;
+  contenidoHash: string;
 }
 
 export interface InsertPedidoResult {
@@ -83,6 +84,7 @@ export async function upsertPedido({
   fecha,
   archivoOriginal,
   parseResult,
+  contenidoHash,
 }: InsertPedidoInput): Promise<InsertPedidoResult> {
   const pool = await getDb();
   const client = await pool.connect();
@@ -108,16 +110,32 @@ export async function upsertPedido({
              importado_en = to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS'),
              total_lineas = $2,
              total_unidades = $3,
-             total_errores = $4
-         WHERE id = $5`,
-        [archivoOriginal, parseResult.totalLineas, parseResult.totalUnidades, parseResult.errores.length, pedidoId]
+             total_errores = $4,
+             contenido_hash = $5
+         WHERE id = $6`,
+        [
+          archivoOriginal,
+          parseResult.totalLineas,
+          parseResult.totalUnidades,
+          parseResult.errores.length,
+          contenidoHash,
+          pedidoId,
+        ]
       );
     } else {
       const info = await client.query<{ id: number }>(
-        `INSERT INTO pedidos (nombre, fecha, archivo_original, total_lineas, total_unidades, total_errores)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO pedidos (nombre, fecha, archivo_original, total_lineas, total_unidades, total_errores, contenido_hash)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING id`,
-        [nombre, fecha, archivoOriginal, parseResult.totalLineas, parseResult.totalUnidades, parseResult.errores.length]
+        [
+          nombre,
+          fecha,
+          archivoOriginal,
+          parseResult.totalLineas,
+          parseResult.totalUnidades,
+          parseResult.errores.length,
+          contenidoHash,
+        ]
       );
       pedidoId = info.rows[0].id;
     }
@@ -176,9 +194,13 @@ export async function updatePedidoMetadata(
 export interface ReplacePedidoInput {
   archivoOriginal: string;
   parseResult: ParseResult;
+  contenidoHash: string;
 }
 
-export async function replacePedidoArchivo(id: number, { archivoOriginal, parseResult }: ReplacePedidoInput): Promise<boolean> {
+export async function replacePedidoArchivo(
+  id: number,
+  { archivoOriginal, parseResult, contenidoHash }: ReplacePedidoInput
+): Promise<boolean> {
   const pool = await getDb();
   const client = await pool.connect();
 
@@ -198,9 +220,10 @@ export async function replacePedidoArchivo(id: number, { archivoOriginal, parseR
            importado_en = to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD HH24:MI:SS'),
            total_lineas = $2,
            total_unidades = $3,
-           total_errores = $4
-       WHERE id = $5`,
-      [archivoOriginal, parseResult.totalLineas, parseResult.totalUnidades, parseResult.errores.length, id]
+           total_errores = $4,
+           contenido_hash = $5
+       WHERE id = $6`,
+      [archivoOriginal, parseResult.totalLineas, parseResult.totalUnidades, parseResult.errores.length, contenidoHash, id]
     );
 
     await insertarLineas(client, id, parseResult.lineas);
@@ -213,6 +236,39 @@ export async function replacePedidoArchivo(id: number, { archivoOriginal, parseR
   } finally {
     client.release();
   }
+}
+
+/**
+ * Busca pedidos ya guardados con el mismo contenido (mismas líneas), para
+ * avisar de posibles reimportaciones accidentales. `excluir` descarta el
+ * propio pedido que se está reemplazando (por id) o el que se está
+ * importando con ese nombre+fecha exactos (un reemplazo intencionado).
+ */
+export async function findPedidosPorContenido(
+  hash: string,
+  excluir: { id?: number; nombreFecha?: { nombre: string; fecha: string } } = {}
+): Promise<PedidoSummary[]> {
+  const db = await getDb();
+  const conditions = ['contenido_hash = $1'];
+  const params: unknown[] = [hash];
+
+  if (excluir.id) {
+    params.push(excluir.id);
+    conditions.push(`id <> $${params.length}`);
+  }
+  if (excluir.nombreFecha) {
+    params.push(excluir.nombreFecha.nombre);
+    const idxNombre = params.length;
+    params.push(excluir.nombreFecha.fecha);
+    const idxFecha = params.length;
+    conditions.push(`NOT (nombre = $${idxNombre} AND fecha = $${idxFecha})`);
+  }
+
+  const { rows } = await db.query<PedidoRow>(
+    `SELECT * FROM pedidos WHERE ${conditions.join(' AND ')} ORDER BY fecha DESC`,
+    params
+  );
+  return rows.map(toPedidoSummary);
 }
 
 export async function getPedidoDetail(id: number): Promise<PedidoDetail | null> {

@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { hashContenidoPedido } from './parser';
 
 declare global {
   // eslint-disable-next-line no-var
@@ -17,8 +18,11 @@ const SCHEMA_SQL = `
     total_lineas INTEGER NOT NULL,
     total_unidades INTEGER NOT NULL,
     total_errores INTEGER NOT NULL DEFAULT 0,
+    contenido_hash TEXT,
     UNIQUE (nombre, fecha)
   );
+
+  ALTER TABLE pedidos ADD COLUMN IF NOT EXISTS contenido_hash TEXT;
 
   CREATE TABLE IF NOT EXISTS pedido_lineas (
     id SERIAL PRIMARY KEY,
@@ -35,7 +39,28 @@ const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_pedido_lineas_pedido ON pedido_lineas(pedido_id);
   CREATE INDEX IF NOT EXISTS idx_pedido_lineas_barcode ON pedido_lineas(codigo_barras);
   CREATE INDEX IF NOT EXISTS idx_pedido_lineas_laboratorio ON pedido_lineas(laboratorio);
+  CREATE INDEX IF NOT EXISTS idx_pedidos_contenido_hash ON pedidos(contenido_hash);
 `;
+
+/**
+ * Los pedidos importados antes de que existiera `contenido_hash` no lo
+ * tienen calculado; se rellena una única vez a partir de sus líneas ya
+ * guardadas, con la misma función de huella que se usa al importar.
+ */
+async function backfillContenidoHash(pool: Pool): Promise<void> {
+  const { rows: pendientes } = await pool.query<{ id: number }>(
+    'SELECT id FROM pedidos WHERE contenido_hash IS NULL'
+  );
+
+  for (const { id } of pendientes) {
+    const { rows: lineas } = await pool.query<{ codigo_barras: string; unidades: number }>(
+      'SELECT codigo_barras, unidades FROM pedido_lineas WHERE pedido_id = $1',
+      [id]
+    );
+    const hash = hashContenidoPedido(lineas.map((l) => ({ codigoBarras: l.codigo_barras, unidades: l.unidades })));
+    await pool.query('UPDATE pedidos SET contenido_hash = $1 WHERE id = $2', [hash, id]);
+  }
+}
 
 function createPool(): Pool {
   const connectionString = process.env.DATABASE_URL;
@@ -58,7 +83,10 @@ export async function getDb(): Promise<Pool> {
     globalThis.__farmalagosPool = createPool();
   }
   if (!globalThis.__farmalagosSchemaReady) {
-    globalThis.__farmalagosSchemaReady = globalThis.__farmalagosPool.query(SCHEMA_SQL).then(() => undefined);
+    const pool = globalThis.__farmalagosPool;
+    globalThis.__farmalagosSchemaReady = pool
+      .query(SCHEMA_SQL)
+      .then(() => backfillContenidoHash(pool));
   }
   await globalThis.__farmalagosSchemaReady;
   return globalThis.__farmalagosPool;

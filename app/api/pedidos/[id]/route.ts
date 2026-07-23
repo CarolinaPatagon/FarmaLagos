@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { decodePedidoBuffer, parsePedidoTxt } from '@/lib/parser';
-import { deletePedido, getPedidoDetail, replacePedidoArchivo, updatePedidoMetadata } from '@/lib/queries';
+import { decodePedidoBuffer, hashContenidoPedido, parsePedidoTxt } from '@/lib/parser';
+import {
+  deletePedido,
+  findPedidosPorContenido,
+  getPedidoDetail,
+  replacePedidoArchivo,
+  updatePedidoMetadata,
+} from '@/lib/queries';
 
 export const runtime = 'nodejs';
 
@@ -61,6 +67,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
 
   const formData = await request.formData();
   const archivo = formData.get('archivo');
+  const forzar = String(formData.get('forzar') ?? '') === '1';
   if (!(archivo instanceof File)) {
     return NextResponse.json({ error: 'Debes adjuntar el fichero .txt del pedido.' }, { status: 400 });
   }
@@ -80,7 +87,16 @@ export async function PUT(request: NextRequest, { params }: Params) {
     );
   }
 
-  const reemplazado = await replacePedidoArchivo(id, { archivoOriginal: archivo.name, parseResult });
+  const contenidoHash = hashContenidoPedido(parseResult.lineas);
+
+  if (!forzar) {
+    const duplicados = await findPedidosPorContenido(contenidoHash, { id });
+    if (duplicados.length > 0) {
+      return NextResponse.json({ duplicado: duplicados[0] }, { status: 409 });
+    }
+  }
+
+  const reemplazado = await replacePedidoArchivo(id, { archivoOriginal: archivo.name, parseResult, contenidoHash });
   if (!reemplazado) {
     return NextResponse.json({ error: 'Pedido no encontrado.' }, { status: 404 });
   }
