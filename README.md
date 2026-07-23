@@ -17,6 +17,9 @@ pedidos importados y ofrece un dashboard dinámico para analizarlos, tanto de fo
   laboratorios por unidades pedidas, y el detalle completo de líneas (con buscador).
 - **Dashboard global** (`/`): evolución de unidades pedidas a lo largo del tiempo, top 10
   productos y laboratorios de todo el histórico, y accesos rápidos a los pedidos recientes.
+  Se puede filtrar por rango de fechas, por pedido concreto, por laboratorio y por medicamento
+  (búsqueda por texto); los filtros quedan en la URL (`?fechaDesde=...&laboratorio=...`), así
+  que se pueden compartir o guardar como enlace.
 - **Importación masiva por CLI** (`npm run import:historicos`): importa de una vez todos los
   ficheros `.txt` que coloques en `data/historicos/` (ver `data/historicos/README.md`).
 

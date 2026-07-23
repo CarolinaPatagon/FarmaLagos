@@ -1,14 +1,42 @@
 import Link from 'next/link';
+import { DashboardFilters } from '@/components/DashboardFilters';
 import { EvolutionChart, EvolutionLegendLinks } from '@/components/EvolutionChart';
 import { RankingBarChart } from '@/components/RankingBarChart';
 import { StatCard } from '@/components/StatCard';
 import { formatFecha, formatNumber } from '@/lib/format';
-import { getOverview } from '@/lib/queries';
+import { getOverview, listLaboratorios, listPedidos } from '@/lib/queries';
+import type { OverviewFilters } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
-export default async function DashboardPage() {
-  const overview = await getOverview();
+interface PageProps {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}
+
+function primerValor(valor: string | string[] | undefined): string | undefined {
+  return Array.isArray(valor) ? valor[0] : valor;
+}
+
+export default async function DashboardPage({ searchParams }: PageProps) {
+  const sp = await searchParams;
+
+  const filters: OverviewFilters = {
+    fechaDesde: primerValor(sp.fechaDesde) || undefined,
+    fechaHasta: primerValor(sp.fechaHasta) || undefined,
+    pedidoId: primerValor(sp.pedidoId) ? Number(primerValor(sp.pedidoId)) : undefined,
+    producto: primerValor(sp.producto) || undefined,
+    laboratorio: primerValor(sp.laboratorio) || undefined,
+  };
+  const hayFiltrosActivos = Object.values(filters).some((v) => v !== undefined);
+
+  const [pedidos, laboratorios, overview] = await Promise.all([
+    listPedidos(),
+    listLaboratorios(),
+    getOverview(filters),
+  ]);
+
+  const sinPedidosEnAbsoluto = pedidos.length === 0;
+  const sinResultadosPorFiltros = !sinPedidosEnAbsoluto && overview.totalPedidos === 0 && hayFiltrosActivos;
 
   return (
     <div className="space-y-8">
@@ -22,7 +50,7 @@ export default async function DashboardPage() {
         </Link>
       </div>
 
-      {overview.totalPedidos === 0 ? (
+      {sinPedidosEnAbsoluto ? (
         <div className="card text-center">
           <p className="text-slate-600">
             Todavía no se ha importado ningún pedido. Empieza importando tu primer fichero de pedido.
@@ -33,12 +61,40 @@ export default async function DashboardPage() {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard label="Pedidos importados" value={formatNumber(overview.totalPedidos)} />
-            <StatCard label="Unidades históricas" value={formatNumber(overview.totalUnidadesHistorico)} />
-            <StatCard label="Productos distintos" value={formatNumber(overview.productosUnicosHistorico)} />
-            <StatCard label="Laboratorios distintos" value={formatNumber(overview.laboratoriosUnicosHistorico)} />
-          </div>
+          <DashboardFilters pedidos={pedidos} laboratorios={laboratorios} />
+
+          {sinResultadosPorFiltros ? (
+            <div className="card text-center">
+              <p className="text-slate-600">No hay resultados para estos filtros.</p>
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <StatCard label="Pedidos con resultados" value={formatNumber(overview.totalPedidos)} />
+                <StatCard label="Unidades" value={formatNumber(overview.totalUnidadesHistorico)} />
+                <StatCard label="Productos distintos" value={formatNumber(overview.productosUnicosHistorico)} />
+                <StatCard label="Laboratorios distintos" value={formatNumber(overview.laboratoriosUnicosHistorico)} />
+              </div>
+
+              <div className="card">
+                <h2 className="mb-1 text-lg font-semibold">Evolución de unidades pedidas</h2>
+                <p className="mb-4 text-sm text-slate-500">Total de unidades por pedido, ordenado por fecha.</p>
+                <EvolutionChart data={overview.evolucion} />
+                <EvolutionLegendLinks data={overview.evolucion} />
+              </div>
+
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                <div className="card">
+                  <h2 className="mb-4 text-lg font-semibold">Top 10 productos</h2>
+                  <RankingBarChart data={overview.topProductosHistorico} />
+                </div>
+                <div className="card">
+                  <h2 className="mb-4 text-lg font-semibold">Top 10 laboratorios</h2>
+                  <RankingBarChart data={overview.topLaboratoriosHistorico} color="#146143" />
+                </div>
+              </div>
+            </>
+          )}
 
           {overview.ultimoPedido ? (
             <div className="card flex flex-wrap items-center justify-between gap-4">
@@ -57,24 +113,6 @@ export default async function DashboardPage() {
               </Link>
             </div>
           ) : null}
-
-          <div className="card">
-            <h2 className="mb-1 text-lg font-semibold">Evolución de unidades pedidas</h2>
-            <p className="mb-4 text-sm text-slate-500">Total de unidades por pedido, ordenado por fecha.</p>
-            <EvolutionChart data={overview.evolucion} />
-            <EvolutionLegendLinks data={overview.evolucion} />
-          </div>
-
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <div className="card">
-              <h2 className="mb-4 text-lg font-semibold">Top 10 productos (histórico)</h2>
-              <RankingBarChart data={overview.topProductosHistorico} />
-            </div>
-            <div className="card">
-              <h2 className="mb-4 text-lg font-semibold">Top 10 laboratorios (histórico)</h2>
-              <RankingBarChart data={overview.topLaboratoriosHistorico} color="#146143" />
-            </div>
-          </div>
 
           <div className="flex justify-end">
             <Link href="/pedidos" className="btn-secondary">

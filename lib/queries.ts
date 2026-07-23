@@ -2,6 +2,7 @@ import { getDb } from './db';
 import type { ParseResult } from './parser';
 import type {
   OverviewData,
+  OverviewFilters,
   PedidoAnalysis,
   PedidoDetail,
   PedidoLineaRow,
@@ -175,20 +176,56 @@ export async function getPedidoDetail(id: number): Promise<PedidoDetail | null> 
   return { ...toPedidoSummary(pedidoRow), lineas };
 }
 
+/**
+ * Construye las condiciones WHERE compartidas por los agregados filtrables:
+ * rango de fechas y pedido concreto sobre `pedidos` (alias p), y búsqueda de
+ * producto sobre `pedido_lineas` (alias pl).
+ */
+function buildFilterConditions(filters: OverviewFilters): { conditions: string[]; params: unknown[] } {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (filters.fechaDesde) {
+    params.push(filters.fechaDesde);
+    conditions.push(`p.fecha >= $${params.length}`);
+  }
+  if (filters.fechaHasta) {
+    params.push(filters.fechaHasta);
+    conditions.push(`p.fecha <= $${params.length}`);
+  }
+  if (filters.pedidoId) {
+    params.push(filters.pedidoId);
+    conditions.push(`p.id = $${params.length}`);
+  }
+  if (filters.producto) {
+    params.push(`%${filters.producto}%`);
+    conditions.push(`pl.nombre_comercial ILIKE $${params.length}`);
+  }
+  if (filters.laboratorio) {
+    params.push(filters.laboratorio);
+    conditions.push(`pl.laboratorio = $${params.length}`);
+  }
+
+  return { conditions, params };
+}
+
 async function ranking(
   db: Awaited<ReturnType<typeof getDb>>,
   column: 'nombre_comercial' | 'laboratorio',
-  pedidoId?: number
+  filters: OverviewFilters = {}
 ): Promise<RankingItem[]> {
-  const where = pedidoId ? 'WHERE pedido_id = $1' : '';
+  const { conditions, params } = buildFilterConditions(filters);
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
   const { rows } = await db.query<{ clave: string; unidades: string; lineas: string }>(
-    `SELECT ${column} AS clave, SUM(unidades) AS unidades, COUNT(*) AS lineas
-     FROM pedido_lineas
+    `SELECT pl.${column} AS clave, SUM(pl.unidades) AS unidades, COUNT(*) AS lineas
+     FROM pedido_lineas pl
+     JOIN pedidos p ON p.id = pl.pedido_id
      ${where}
-     GROUP BY ${column}
-     ORDER BY SUM(unidades) DESC
+     GROUP BY pl.${column}
+     ORDER BY SUM(pl.unidades) DESC
      LIMIT ${TOP_N}`,
-    pedidoId ? [pedidoId] : []
+    params
   );
   return rows.map((r) => ({
     clave: r.clave || '(sin dato)',
@@ -204,8 +241,8 @@ export async function getPedidoAnalysis(id: number): Promise<PedidoAnalysis | nu
   if (!pedidoRow) return null;
 
   const [topProductos, topLaboratorios, conteo] = await Promise.all([
-    ranking(db, 'nombre_comercial', id),
-    ranking(db, 'laboratorio', id),
+    ranking(db, 'nombre_comercial', { pedidoId: id }),
+    ranking(db, 'laboratorio', { pedidoId: id }),
     db.query<{ productosUnicos: string; laboratoriosUnicos: string }>(
       `SELECT COUNT(DISTINCT nombre_comercial) AS "productosUnicos", COUNT(DISTINCT laboratorio) AS "laboratoriosUnicos"
        FROM pedido_lineas WHERE pedido_id = $1`,
@@ -229,10 +266,20 @@ export async function getPedidoAnalysis(id: number): Promise<PedidoAnalysis | nu
   };
 }
 
-export async function getOverview(): Promise<OverviewData> {
+export async function listLaboratorios(): Promise<string[]> {
+  const db = await getDb();
+  const { rows } = await db.query<{ laboratorio: string }>(
+    `SELECT DISTINCT laboratorio FROM pedido_lineas WHERE laboratorio <> '' ORDER BY laboratorio ASC`
+  );
+  return rows.map((r) => r.laboratorio);
+}
+
+export async function getOverview(filters: OverviewFilters = {}): Promise<OverviewData> {
   const db = await getDb();
 
   const pedidos = await listPedidos();
+  const { conditions, params } = buildFilterConditions(filters);
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
   const totalesResult = await db.query<{
     totalPedidos: string;
@@ -241,21 +288,54 @@ export async function getOverview(): Promise<OverviewData> {
     laboratoriosUnicos: string;
   }>(
     `SELECT
-      COUNT(DISTINCT pedido_id) AS "totalPedidos",
-      COALESCE(SUM(unidades), 0) AS "totalUnidades",
-      COUNT(DISTINCT nombre_comercial) AS "productosUnicos",
-      COUNT(DISTINCT laboratorio) AS "laboratoriosUnicos"
-    FROM pedido_lineas`
+      COUNT(DISTINCT pl.pedido_id) AS "totalPedidos",
+      COALESCE(SUM(pl.unidades), 0) AS "totalUnidades",
+      COUNT(DISTINCT pl.nombre_comercial) AS "productosUnicos",
+      COUNT(DISTINCT pl.laboratorio) AS "laboratoriosUnicos"
+    FROM pedido_lineas pl
+    JOIN pedidos p ON p.id = pl.pedido_id
+    ${where}`,
+    params
   );
   const totales = totalesResult.rows[0];
 
-  const evolucion = [...pedidos]
-    .sort((a, b) => a.fecha.localeCompare(b.fecha) || a.importadoEn.localeCompare(b.importadoEn))
-    .map((p) => ({ fecha: p.fecha, nombre: p.nombre, pedidoId: p.id, unidades: p.totalUnidades, lineas: p.totalLineas }));
+  // buildFilterConditions siempre añade las condiciones sobre `p` (fecha/pedido) antes que
+  // las condiciones sobre `pl` (producto/laboratorio), así que ambos grupos son un prefijo y
+  // un sufijo contiguos de `conditions`/`params` con su numeración $n original intacta.
+  const condicionesPedido = conditions.filter((c) => c.startsWith('p.'));
+  const evolucionWhere = condicionesPedido.length ? `WHERE ${condicionesPedido.join(' AND ')}` : '';
+  // Los filtros sobre pl (producto/laboratorio) se aplican en el JOIN, no en el WHERE,
+  // para que un pedido sin líneas que casen siga apareciendo con 0 en el gráfico.
+  const joinExtra = conditions.slice(condicionesPedido.length).join(' AND ');
+
+  const evolucionResult = await db.query<{
+    pedido_id: number;
+    nombre: string;
+    fecha: string;
+    unidades: string;
+    lineas: string;
+  }>(
+    `SELECT p.id AS pedido_id, p.nombre, p.fecha,
+       COALESCE(SUM(pl.unidades), 0) AS unidades, COUNT(pl.id) AS lineas
+     FROM pedidos p
+     LEFT JOIN pedido_lineas pl ON pl.pedido_id = p.id ${joinExtra ? `AND ${joinExtra}` : ''}
+     ${evolucionWhere}
+     GROUP BY p.id, p.nombre, p.fecha
+     ORDER BY p.fecha ASC, p.importado_en ASC`,
+    params
+  );
+
+  const evolucion = evolucionResult.rows.map((r) => ({
+    fecha: r.fecha,
+    nombre: r.nombre,
+    pedidoId: r.pedido_id,
+    unidades: Number(r.unidades),
+    lineas: Number(r.lineas),
+  }));
 
   const [topProductosHistorico, topLaboratoriosHistorico] = await Promise.all([
-    ranking(db, 'nombre_comercial'),
-    ranking(db, 'laboratorio'),
+    ranking(db, 'nombre_comercial', filters),
+    ranking(db, 'laboratorio', filters),
   ]);
 
   return {

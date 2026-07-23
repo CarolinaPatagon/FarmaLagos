@@ -39,6 +39,14 @@ export interface PedidoAnalysis {
   unidadesPromedioPorLinea: number;
 }
 
+export interface OverviewFilters {
+  fechaDesde?: string;
+  fechaHasta?: string;
+  pedidoId?: number;
+  producto?: string;
+  laboratorio?: string;
+}
+
 export interface OverviewData {
   totalPedidos: number;
   totalUnidadesHistorico: number;
